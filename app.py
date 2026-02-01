@@ -1,8 +1,12 @@
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer
 import cv2
-import mediapipe as mp
 import av
+import mediapipe as mp
+
+mp_pose = mp.solutions.pose
+mp_drawing = mp.solutions.drawing_utils
+mp_drawing_styles = mp.solutions.drawing_styles
 
 # --- 1. إعداد الصفحة ---
 st.set_page_config(page_title="Smart Guard AI", layout="wide", page_icon="🛡️")
