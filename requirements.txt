@@ -1,4 +1,6 @@
 streamlit
+streamlit-webrtc
+opencv-python-headless
 pandas
 numpy
 opencv-python-headless
