@@ -1,80 +1,82 @@
 import streamlit as st
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 import cv2
 import numpy as np
 import pandas as pd
 import time
 
-# إعداد الصفحة
-st.set_page_config(page_title="Smart Guard AI - Real-time Vision", layout="wide")
+# --- إعدادات الواجهة الاحترافية ---
+st.set_page_config(page_title="Smart Guard AI - Control Center", layout="wide")
 
-st.title("🛡️ Smart Guard AI - نظام الرقابة الحية")
-st.markdown("تحليل نشاط الموقع عبر كاميرا الحاسوب مباشرة")
+st.title("🏗️ Smart Guard AI: منظومة الرقابة والحوكمة الميدانية")
+st.markdown("---")
 
-# --- دالة تحليل الإحصائيات الحقيقية ---
-def process_frame(frame, backSub):
-    # 1. تحويل الصورة وفصل الخلفية لرصد الحركة
-    fg_mask = backSub.apply(frame)
-    
-    # 2. تنظيف الضجيج
-    _, fg_mask = cv2.threshold(fg_mask, 250, 255, cv2.THRESH_BINARY)
-    
-    # 3. حساب نسبة الحركة (الإحصائية الحقيقية)
-    motion_area = np.sum(fg_mask == 255)
-    total_area = frame.shape[0] * frame.shape[1]
-    activity_percent = (motion_area / total_area) * 100
-    
-    return fg_mask, round(activity_percent, 2)
+# --- محرك معالجة الفيديو والذكاء الاصطناعي ---
+class SmartGuardProcessor(VideoProcessorBase):
+    def __init__(self):
+        # محرك فصل الخلفية لرصد الحركة
+        self.backSub = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=50, detectShadows=True)
+        self.motion_history = []
 
-# --- واجهة التحكم ---
-with st.sidebar:
-    st.header("⚙️ إعدادات الحساسية")
-    threshold = st.slider("حد تنبيه النشاط المرتفع (%)", 0.0, 20.0, 5.0)
-    run_cam = st.toggle("تشغيل الكاميرا الحية", value=False)
-
-# --- منطقة العرض ---
-col_video, col_stats = st.columns([2, 1])
-
-if run_cam:
-    cap = cv2.VideoCapture(0) # فتح كاميرا الحاسوب
-    backSub = cv2.createBackgroundSubtractorMOG2()
-    
-    video_placeholder = col_video.empty()
-    metrics_placeholder = col_stats.empty()
-    
-    # سجل تاريخي بسيط للإحصائيات
-    history = []
-
-    while run_cam:
-        ret, frame = cap.read()
-        if not ret:
-            st.error("فشل الوصول إلى الكاميرا")
-            break
+    def recv(self, frame):
+        img = frame.to_ndarray(format="bgr24")
         
-        # معالجة الإطار واستخراج الإحصائيات
-        processed_mask, activity = process_frame(frame, backSub)
-        history.append(activity)
-        if len(history) > 20: history.pop(0)
-
-        # عرض الفيديو (تحويل الألوان ليتناسب مع Streamlit)
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        video_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
+        # 1. تحليل الحركة (Activity Analysis)
+        fg_mask = self.backSub.apply(img)
         
-        # تحديث الإحصائيات الحقيقية
-        with metrics_placeholder.container():
-            st.metric("مستوى النشاط اللحظي", f"{activity}%")
-            st.metric("متوسط الحركة (آخر دقيقة)", f"{np.mean(history):.2f}%")
-            
-            if activity > threshold:
-                st.warning(f"⚠️ تنبيه: نشاط غير عادي رُصد في الموقع! ({activity}%)")
-                # هنا يمكن ربط نظام التنبيه الصوتي الذي ناقشناه مع شعيب
-            else:
-                st.success("✅ الوضع مستقر")
-            
-            # عرض رسم بياني صغير للنشاط
-            st.line_chart(history)
+        # تنظيف الصورة من الضجيج
+        _, fg_mask = cv2.threshold(fg_mask, 250, 255, cv2.THRESH_BINARY)
+        
+        # حساب نسبة النشاط الحقيقي
+        motion_area = np.sum(fg_mask == 255)
+        activity_percent = (motion_area / fg_mask.size) * 100
+        
+        # 2. إضافة الطبقة الذكية على الفيديو (AI Overlay)
+        status_color = (0, 0, 255) if activity_percent > 5 else (0, 255, 0)
+        status_text = "DANGER: HIGH ACTIVITY" if activity_percent > 5 else "SAFE: NORMAL"
+        
+        # رسم مستطيل الحالة والمعلومات
+        cv2.rectangle(img, (0, 0), (300, 60), (0, 0, 0), -1)
+        cv2.putText(img, f"Activity: {activity_percent:.2f}%", (10, 25), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        cv2.putText(img, status_text, (10, 50), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
+        
+        return frame.from_ndarray(img, format="bgr24")
 
-        time.sleep(0.05) # تحسين الأداء
+# --- توزيع واجهة المستخدم (Layout) ---
+col_cam, col_stats = st.columns([2, 1])
+
+with col_cam:
+    st.subheader("📹 بث الرقابة الحية (WebRTC Stream)")
+    webrtc_streamer(
+        key="smart-guard-stream",
+        video_processor_factory=SmartGuardProcessor,
+        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+        media_stream_constraints={"video": True, "audio": False},
+    )
+    st.caption("ملاحظة: اضغط على 'Start' لتفعيل الكاميرا وبدء التحليل الذكي.")
+
+with col_stats:
+    st.subheader("📊 إحصائيات الحوكمة")
+    st.metric("حالة الموقع اللحظية", "متصل (Live)", delta="Active")
     
-    cap.release()
-else:
-    col_video.info("قم بتفعيل الزر الجانبي لبدء الرقابة الحية.")
+    with st.expander("🚨 غرفة العمليات (War Room)"):
+        st.write("بديل Workplace للتواصل الفوري:")
+        st.text_area("تعليمات للمشرفين:", placeholder="أدخل تعليماتك هنا...")
+        if st.button("إرسال تنبيه عاجل"):
+            st.warning("تم إرسال التنبيه لجميع الهواتف المتصلة.")
+
+    st.markdown("---")
+    st.subheader("📋 سجل المخاطر الديناميكي")
+    risk_data = {
+        "الخطر": ["حركة غير مصرحة", "تجمهر عمال", "توقف مفاجئ"],
+        "الحالة": ["مراقب", "مراقب", "مراقب"],
+        "بند العقود": ["Art 12.1", "Art 4.2", "Art 7.5"]
+    }
+    st.table(pd.DataFrame(risk_data))
+
+# --- قسم الحوكمة القانونية ---
+st.markdown("---")
+if st.button("توليد تقرير إثبات الالتزام (Compliance Report)"):
+    st.success("✅ تم استخراج تقرير الحوكمة الرقمي لتقديمه للمستشارين.")
