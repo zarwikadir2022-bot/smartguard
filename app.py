@@ -1,64 +1,76 @@
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 import cv2
+import mediapipe as mp
+import av
 import numpy as np
-import pandas as pd
-import importlib
 
-# --- إعداد الهوية ---
-st.set_page_config(page_title="Smart Guard AI", layout="wide")
+# --- 1. إعداد الصفحة والشعار ---
+st.set_page_config(page_title="Smart Guard AI", layout="wide", page_icon="🛡️")
 
-# --- استيراد ذكي وآمن ---
-MP_POSE = None
-MP_DRAWING = None
+st.title("🛡️ Smart Guard AI - Live Monitor")
+st.markdown("---")
 
-try:
-    # محاولة فرض تحميل المكونات
-    mp = importlib.import_module('mediapipe')
-    if hasattr(mp, 'solutions'):
-        MP_POSE = mp.solutions.pose
-        MP_DRAWING = mp.solutions.drawing_utils
-except Exception as e:
-    st.sidebar.error(f"محرك AI في وضع الخمول: {e}")
+# --- 2. القائمة الجانبية (الإعدادات) ---
+st.sidebar.title("⚙️ Control Panel")
+st.sidebar.info("اضبط هذه القيم لتلائم إضاءة الموقع.")
 
-# --- المحرك البرمجي ---
-class IntegratedAIProcessor(VideoProcessorBase):
+# أشرطة التحكم في الحساسية (الحل لمشكلتك)
+# القيمة الافتراضية 0.5، جرب خفضها إلى 0.3 إذا لم يظهر شيء
+detection_conf = st.sidebar.slider("Min Detection Confidence (حساسية الكشف)", 0.1, 1.0, 0.5, 0.05)
+tracking_conf = st.sidebar.slider("Min Tracking Confidence (حساسية التتبع)", 0.1, 1.0, 0.5, 0.05)
+
+# خيارات إضافية للعرض
+draw_landmarks = st.sidebar.checkbox("Show Skeleton (إظهار الهيكل)", value=True)
+flip_video = st.sidebar.checkbox("Flip Video (قلب الصورة)", value=False)
+
+st.sidebar.markdown("---")
+st.sidebar.caption("Powered by Integrity Business Hub")
+
+# --- 3. تهيئة MediaPipe ---
+mp_pose = mp.solutions.pose
+mp_drawing = mp.solutions.drawing_utils
+mp_drawing_styles = mp.solutions.drawing_styles
+
+# --- 4. كلاس المعالجة (The Brain) ---
+class PoseDetector:
     def __init__(self):
-        self.pose_tracker = None
-        if MP_POSE:
-            self.pose_tracker = MP_POSE.Pose(
-                model_complexity=1,
-                min_detection_confidence=0.5,
-                min_tracking_confidence=0.5
-            )
+        # نقوم بتهيئة الموديل بالقيم القادمة من الـ Sidebar
+        self.pose = mp_pose.Pose(
+            min_detection_confidence=detection_conf,
+            min_tracking_confidence=tracking_conf
+        )
 
     def recv(self, frame):
+        # تحويل الإطار القادم من الويب (AV format) إلى صورة (NumPy array)
         img = frame.to_ndarray(format="bgr24")
+
+        # قلب الصورة إذا طلب المستخدم (للكاميرا الأمامية)
+        if flip_video:
+            img = cv2.flip(img, 1)
+
+        # تحويل الألوان لـ MediaPipe (يقبل RGB فقط)
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         
-        if self.pose_tracker:
-            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            results = self.pose_tracker.process(img_rgb)
+        # --- المعالجة الذكية ---
+        results = self.pose.process(img_rgb)
 
-            if results.pose_landmarks:
-                MP_DRAWING.draw_landmarks(img, results.pose_landmarks, MP_POSE.POSE_CONNECTIONS)
-                cv2.putText(img, "AUTOMATED MONITORING: ACTIVE", (10, 30), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        
-        return frame.from_ndarray(img, format="bgr24")
+        # تجهيز الصورة للرسم (إرجاعها لـ BGR)
+        img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 
-# --- الواجهة المتكاملة ---
-st.title("🛡️ Smart Guard AI | مركز الحوكمة")
+        # ارتفاع وعرض الصورة
+        h, w, c = img_bgr.shape
 
-tab1, tab2 = st.tabs(["📺 الرقابة الحية", "📊 سجل المخاطر"])
-
-with tab1:
-    webrtc_streamer(
-        key="final-fix",
-        video_processor_factory=IntegratedAIProcessor,
-        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-        media_stream_constraints={"video": True, "audio": False}
-    )
-
-with tab2:
-    st.subheader("📋 سجل المخاطر الرقمي")
-    st.info("سيتم تسجيل الانتهاكات الأرغونومية هنا آلياً بمجرد تفعيل الكاميرا.")
+        # --- الرسم والمنطق ---
+        if results.pose_landmarks:
+            # 1. رسم الهيكل العظمي
+            if draw_landmarks:
+                mp_drawing.draw_landmarks(
+                    img_bgr,
+                    results.pose_landmarks,
+                    mp_pose.POSE_CONNECTIONS,
+                    landmark_drawing_spec=mp_drawing_styles.get_default_pose_landmarks_style()
+                )
+            
+            # 2. كتابة حالة "تم الرصد"
+            cv2.putText(img_bgr, "TARGET
