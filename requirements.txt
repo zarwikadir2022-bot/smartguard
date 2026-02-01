@@ -1,7 +1,6 @@
 streamlit
 streamlit-webrtc
 opencv-python-headless
-av
-numpy
 mediapipe
-protobuf!=4.21.0,!=4.21.1,!=4.21.2,!=4.21.3,!=4.21.4,!=4.21.5,<5.0.0dev
+numpy
+av
