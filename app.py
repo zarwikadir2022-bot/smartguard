@@ -1,91 +1,80 @@
 import streamlit as st
-import pandas as pd
+import cv2
 import numpy as np
+import pandas as pd
 import time
 
-# --- إعدادات الواجهة الاحترافية ---
-st.set_page_config(page_title="Smart Guard AI - Safety Command Center", layout="wide")
+# إعداد الصفحة
+st.set_page_config(page_title="Smart Guard AI - Real-time Vision", layout="wide")
 
-# --- محاكي الرؤية الحاسوبية (AI Logic) ---
-def get_ai_detections():
-    """محاكاة الكشف الذكي بناءً على خوارزمية تحليل الاحتمالات"""
-    return [
-        {"Target": "Worker_01", "Status": "No Helmet", "Severity": "Critical", "Prob": 98.5},
-        {"Target": "Worker_04", "Status": "Incorrect Lifting", "Severity": "Medium", "Prob": 75.2},
-        {"Target": "Zone_B", "Status": "Obstacle Detected", "Severity": "High", "Prob": 88.0}
-    ]
+st.title("🛡️ Smart Guard AI - نظام الرقابة الحية")
+st.markdown("تحليل نشاط الموقع عبر كاميرا الحاسوب مباشرة")
 
-# --- إدارة بيانات الجلسة (للتواصل وسجل المخاطر) ---
-if 'alerts' not in st.session_state:
-    st.session_state.alerts = get_ai_detections()
-if 'chat_log' not in st.session_state:
-    st.session_state.chat_log = []
-
-# --- الواجهة الرئيسية ---
-st.title("🛡️ Smart Guard AI: منظومة الرقابة والحوكمة الميدانية")
-st.markdown("---")
-
-# 1. لوحة المؤشرات العليا (Executive Dashboard)
-col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-with col_m1:
-    st.metric("مؤشر الخطر اللحظي", "62%", delta="تنبيه: مرتفع")
-with col_m2:
-    st.metric("العمال في الموقع", "85", "متصل")
-with col_m3:
-    st.metric("مخالفات تم رصدها", len(st.session_state.alerts), "اليوم")
-with col_m4:
-    st.metric("وقت الاستجابة (متوسط)", "1.2 ثانية", "Zero Latency")
-
-st.markdown("---")
-
-# 2. منطقة العمليات المركزية
-col_feed, col_ops = st.columns([2, 1])
-
-with col_feed:
-    st.subheader("📹 بث الرقابة الذكية (AI Live Feed)")
-    # محاكاة واجهة الكاميرا مع المربعات الذكية
-    st.image("https://via.placeholder.com/800x450?text=Live+AI+Monitoring+-+Safety+Vigilance", use_column_width=True)
+# --- دالة تحليل الإحصائيات الحقيقية ---
+def process_frame(frame, backSub):
+    # 1. تحويل الصورة وفصل الخلفية لرصد الحركة
+    fg_mask = backSub.apply(frame)
     
-    # جدول التنبيهات الذكية المستمد من خوارزمية analyze_target
-    st.subheader("⚠️ سجل التنبيهات اللحظي")
-    df_alerts = pd.DataFrame(st.session_state.alerts)
-    st.table(df_alerts)
-
-with col_ops:
-    st.subheader("🚨 غرفة العمليات (War Room)")
-    # وحدة التواصل البديلة لـ Workplace لضمان الحوكمة
-    with st.container(height=350, border=True):
-        for msg in st.session_state.chat_log:
-            st.write(msg)
+    # 2. تنظيف الضجيج
+    _, fg_mask = cv2.threshold(fg_mask, 250, 255, cv2.THRESH_BINARY)
     
-    instruction = st.chat_input("أرسل تعليمات فورية للموقع...")
-    if instruction:
-        st.session_state.chat_log.append(f"👤 مدير الموقع: {instruction}")
-        st.rerun()
+    # 3. حساب نسبة الحركة (الإحصائية الحقيقية)
+    motion_area = np.sum(fg_mask == 255)
+    total_area = frame.shape[0] * frame.shape[1]
+    activity_percent = (motion_area / total_area) * 100
     
-    st.markdown("---")
-    st.subheader("⚖️ مطابقة المعايير (Compliance)")
-    st.checkbox("توثيق المخالفات في السجل العدلي للموقع", value=True)
-    if st.button("توليد تقرير إثبات الالتزام (CCAG)"):
-        st.success("✅ تم تصدير التقرير القانوني بنجاح.")
+    return fg_mask, round(activity_percent, 2)
 
-# 3. قسم الصحة المهنية (Ergonomics Module) بناءً على نصيحة شعيب
-st.markdown("---")
-st.subheader("🧘 وحدة الارغونوميا وتحليل الوضعيات (Ergo-Sense)")
-c1, c2 = st.columns(2)
-with c1:
-    st.info("💡 يتم الآن تحليل وضعيات الرفع لـ 15 عاملاً في المنطقة 'أ'.")
-    st.progress(75, text="التزام بوضعية الظهر السليمة")
-with c2:
-    if st.button("إرسال تنبيه صوتي للعمال ذوي الوضعيات الخاطئة"):
-        st.warning("🔊 تم إرسال تنبيه 'صحح وضعيتك' فوراً عبر المكبرات.")
+# --- واجهة التحكم ---
+with st.sidebar:
+    st.header("⚙️ إعدادات الحساسية")
+    threshold = st.slider("حد تنبيه النشاط المرتفع (%)", 0.0, 20.0, 5.0)
+    run_cam = st.toggle("تشغيل الكاميرا الحية", value=False)
 
-# 4. سجل المخاطر الديناميكي (Dynamic Risk Register) مستوحى من رؤية مارفيل
-st.subheader("📋 سجل المخاطر التفاعلي")
-risk_data = {
-    "الخطر": ["السقوط", "الإصابات العضلية", "التصادم"],
-    "الاحتمالية الحالية": ["عالية", "متوسطة", "منخفضة"],
-    "التحقق الذكي": ["مفعل 24/7", "مراقب آلياً", "مراقب آلياً"],
-    "بند العقد المرتبط": ["Art 12.1", "Art 4.5", "Art 2.2"]
-}
-st.dataframe(pd.DataFrame(risk_data), use_container_width=True)
+# --- منطقة العرض ---
+col_video, col_stats = st.columns([2, 1])
+
+if run_cam:
+    cap = cv2.VideoCapture(0) # فتح كاميرا الحاسوب
+    backSub = cv2.createBackgroundSubtractorMOG2()
+    
+    video_placeholder = col_video.empty()
+    metrics_placeholder = col_stats.empty()
+    
+    # سجل تاريخي بسيط للإحصائيات
+    history = []
+
+    while run_cam:
+        ret, frame = cap.read()
+        if not ret:
+            st.error("فشل الوصول إلى الكاميرا")
+            break
+        
+        # معالجة الإطار واستخراج الإحصائيات
+        processed_mask, activity = process_frame(frame, backSub)
+        history.append(activity)
+        if len(history) > 20: history.pop(0)
+
+        # عرض الفيديو (تحويل الألوان ليتناسب مع Streamlit)
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        video_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
+        
+        # تحديث الإحصائيات الحقيقية
+        with metrics_placeholder.container():
+            st.metric("مستوى النشاط اللحظي", f"{activity}%")
+            st.metric("متوسط الحركة (آخر دقيقة)", f"{np.mean(history):.2f}%")
+            
+            if activity > threshold:
+                st.warning(f"⚠️ تنبيه: نشاط غير عادي رُصد في الموقع! ({activity}%)")
+                # هنا يمكن ربط نظام التنبيه الصوتي الذي ناقشناه مع شعيب
+            else:
+                st.success("✅ الوضع مستقر")
+            
+            # عرض رسم بياني صغير للنشاط
+            st.line_chart(history)
+
+        time.sleep(0.05) # تحسين الأداء
+    
+    cap.release()
+else:
+    col_video.info("قم بتفعيل الزر الجانبي لبدء الرقابة الحية.")
