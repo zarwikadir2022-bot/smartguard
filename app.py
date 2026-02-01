@@ -2,74 +2,88 @@ import streamlit as st
 from streamlit_webrtc import webrtc_streamer
 import cv2
 import av
-import mediapipe as mp
-
-mp_pose = mp.solutions.pose
-mp_drawing = mp.solutions.drawing_utils
-mp_drawing_styles = mp.solutions.drawing_styles
+import numpy as np
 
 # --- 1. إعداد الصفحة ---
 st.set_page_config(page_title="Smart Guard AI", layout="wide", page_icon="🛡️")
-
-st.title("🛡️ Smart Guard AI - Live Monitor")
+st.title("🛡️ Smart Guard AI - Core Monitor")
+st.caption("Powered by OpenCV (No-Dependency Mode)")
 st.markdown("---")
 
-# --- 2. القائمة الجانبية ---
+# --- 2. الإعدادات الجانبية ---
 st.sidebar.title("⚙️ Control Panel")
-st.sidebar.info("Adjust settings based on lighting.")
-
-detection_conf = st.sidebar.slider("Min Detection Confidence", 0.1, 1.0, 0.5, 0.05)
-tracking_conf = st.sidebar.slider("Min Tracking Confidence", 0.1, 1.0, 0.5, 0.05)
-
-draw_skeleton = st.sidebar.checkbox("Show Skeleton", value=True)
+# التحكم في حساسية الكشف (Scale Factor & Neighbors)
+scale_factor = st.sidebar.slider("Detection Sensitivity", 1.1, 2.0, 1.1, 0.1)
+min_neighbors = st.sidebar.slider("Filter Noise (Neighbors)", 1, 10, 3, 1)
 flip_video = st.sidebar.checkbox("Flip Video", value=False)
 
-# --- 3. تهيئة MediaPipe ---
-mp_pose = mp.solutions.pose
-mp_drawing = mp.solutions.drawing_utils
-mp_drawing_styles = mp.solutions.drawing_styles
+# --- 3. تحميل نموذج كشف الجسم (المدمج في OpenCV) ---
+# نستخدم النموذج الجاهز للكشف عن الجسم بالكامل
+cascade_path = cv2.data.haarcascades + 'haarcascade_fullbody.xml'
+# بديل: للكشف عن الوجه والجزء العلوي (أكثر دقة في السيلفي)
+upper_body_path = cv2.data.haarcascades + 'haarcascade_upperbody.xml'
 
-# --- 4. كلاس المعالجة ---
-class PoseProcessor:
-    def __init__(self):
-        self.pose = mp_pose.Pose(
-            min_detection_confidence=detection_conf,
-            min_tracking_confidence=tracking_conf
-        )
+# محاولة تحميل النموذج
+try:
+    body_cascade = cv2.CascadeClassifier(cascade_path)
+    if body_cascade.empty():
+        # إذا فشل الجسم الكامل، نستخدم الجزء العلوي كبديل
+        body_cascade = cv2.CascadeClassifier(upper_body_path)
+except:
+    st.error("Error loading Cascade Classifier XML.")
 
+# --- 4. معالج الفيديو ---
+class VideoProcessor:
     def recv(self, frame):
+        # تحويل الإطار إلى مصفوفة
         img = frame.to_ndarray(format="bgr24")
 
+        # قلب الفيديو
         if flip_video:
             img = cv2.flip(img, 1)
 
-        results = self.pose.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        h, w, _ = img.shape
+        # تحويل للرمادي (ضروري لعمل خوارزمية Haar)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        if results.pose_landmarks:
-            if draw_skeleton:
-                mp_drawing.draw_landmarks(
-                    img,
-                    results.pose_landmarks,
-                    mp_pose.POSE_CONNECTIONS,
-                    landmark_drawing_spec=mp_drawing_styles.get_default_pose_landmarks_style()
-                )
-            cv2.putText(img, "TARGET LOCKED", (30, 50),
+        # --- عملية الكشف (Detection) ---
+        # يقوم المسح بالبحث عن أجسام في الصورة
+        bodies = body_cascade.detectMultiScale(
+            gray,
+            scaleFactor=scale_factor,
+            minNeighbors=min_neighbors,
+            minSize=(50, 50) # أقل حجم للجسم
+        )
+
+        h, w, c = img.shape
+
+        # --- الرسم والمنطق ---
+        if len(bodies) > 0:
+            # تم رصد شخص أو أكثر
+            for (x, y, width, height) in bodies:
+                # رسم مربع أخضر حول الشخص
+                cv2.rectangle(img, (x, y), (x + width, y + height), (0, 255, 0), 3)
+                
+                # كتابة تنبيه فوق الرأس
+                cv2.putText(img, "HUMAN DETECTED", (x, y - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+
+            # واجهة التطبيق العامة
+            cv2.rectangle(img, (0, 0), (w, h), (0, 255, 0), 5)
+            cv2.putText(img, f"TARGETS: {len(bodies)}", (30, 50), 
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            cv2.rectangle(img, (0, 0), (w, h), (0, 255, 0), 3)
+            
         else:
-            cv2.putText(img, "SEARCHING...", (30, 50),
+            # لم يتم رصد أحد
+            cv2.putText(img, "SCANNING AREA...", (30, 50), 
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            cv2.putText(img, "Move back or adjust lighting", (30, 90),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             cv2.rectangle(img, (0, 0), (w, h), (0, 0, 255), 2)
 
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 # --- 5. تشغيل الكاميرا ---
 webrtc_streamer(
-    key=f"stream-{detection_conf}-{tracking_conf}-{flip_video}",
-    video_processor_factory=PoseProcessor,
+    key="opencv-guard",
+    video_processor_factory=VideoProcessor,
     media_stream_constraints={"video": True, "audio": False},
     rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
 )
